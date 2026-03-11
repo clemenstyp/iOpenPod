@@ -9,7 +9,8 @@ from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QCheckBox, QComboBox, QFrame, QScrollArea, QFileDialog,
-    QLineEdit, QStackedWidget,
+    QLineEdit, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QHeaderView,
 )
 from PyQt6.QtGui import QFont, QDesktopServices
 from pathlib import Path
@@ -514,6 +515,184 @@ class _TokenRow(SettingRow):
         self.token_changed.emit("")
 
 
+# ── Tag mapping editor ──────────────────────────────────────────────────────
+
+class _TagMappingEditor(QFrame):
+    """Compact table editor for the ``tag_mapping`` setting.
+
+    Displays a two-column table (Target Field / Source Template) with
+    **Add** and **Remove** buttons.  The ``changed`` signal fires after
+    every structural edit (add/remove row) or after any cell edit.
+    """
+
+    changed = pyqtSignal(dict)  # emits the current mapping dict
+
+    _PLACEHOLDER_TARGET = "e.g. artist"
+    _PLACEHOLDER_SOURCE = "e.g. %album_artist"
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("tagMappingEditor")
+        self.setStyleSheet(f"""
+            QFrame#tagMappingEditor {{
+                background: {Colors.SURFACE_ALT};
+                border: 1px solid {Colors.BORDER_SUBTLE};
+                border-radius: {Metrics.BORDER_RADIUS_LG}px;
+            }}
+        """)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(scaled(16), scaled(16), scaled(16), scaled(16))
+        outer.setSpacing(scaled(12))
+
+        # ── Table ────────────────────────────────────────────────────────
+        self._table = QTableWidget(0, 2)
+        self._table.setHorizontalHeaderLabels(["Target Field", "Source Template"])
+        self._table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self._table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self._table.verticalHeader().setVisible(False)
+        self._table.setShowGrid(False)
+        self._table.setAlternatingRowColors(False)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setMinimumHeight(scaled(120))
+        self._table.setStyleSheet(f"""
+            QTableWidget {{
+                background: {Colors.SURFACE};
+                border: 1px solid {Colors.BORDER};
+                border-radius: {Metrics.BORDER_RADIUS_SM}px;
+                color: {Colors.TEXT_PRIMARY};
+                gridline-color: {Colors.BORDER_SUBTLE};
+                selection-background-color: {Colors.ACCENT};
+            }}
+            QHeaderView::section {{
+                background: {Colors.SURFACE_RAISED};
+                color: {Colors.TEXT_SECONDARY};
+                border: none;
+                border-bottom: 1px solid {Colors.BORDER};
+                padding: {scaled(4)}px {scaled(8)}px;
+                font-size: {Metrics.FONT_SM}pt;
+            }}
+            QTableWidget::item {{
+                padding: {scaled(4)}px {scaled(6)}px;
+            }}
+            QTableWidget::item:selected {{
+                background: {Colors.ACCENT};
+                color: {Colors.TEXT_ON_ACCENT};
+            }}
+        """)
+        self._table.itemChanged.connect(self._on_item_changed)
+        outer.addWidget(self._table)
+
+        # ── Buttons ──────────────────────────────────────────────────────
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(scaled(8))
+
+        self._add_btn = QPushButton("+ Add Rule")
+        self._add_btn.setFont(QFont(FONT_FAMILY, Metrics.FONT_SM))
+        self._add_btn.setFixedWidth(scaled(110))
+        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_btn.setStyleSheet(btn_css(
+            bg=Colors.ACCENT,
+            bg_hover=Colors.ACCENT_LIGHT,
+            bg_press=Colors.ACCENT,
+            fg=Colors.TEXT_ON_ACCENT,
+            border="none",
+            padding="5px 10px",
+        ))
+        self._add_btn.clicked.connect(self._add_row)
+        btn_layout.addWidget(self._add_btn)
+
+        self._remove_btn = QPushButton("Remove")
+        self._remove_btn.setFont(QFont(FONT_FAMILY, Metrics.FONT_SM))
+        self._remove_btn.setFixedWidth(scaled(90))
+        self._remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._remove_btn.setStyleSheet(btn_css(
+            bg=Colors.SURFACE_RAISED,
+            bg_hover=Colors.SURFACE_ACTIVE,
+            bg_press=Colors.SURFACE_ALT,
+            border=f"1px solid {Colors.BORDER}",
+            padding="5px 10px",
+        ))
+        self._remove_btn.clicked.connect(self._remove_selected)
+        btn_layout.addWidget(self._remove_btn)
+
+        btn_layout.addStretch()
+
+        help_lbl = QLabel(
+            "Target: PCTrack field name (artist, album_artist, title, genre, …)\n"
+            "Source: template with %fieldname tokens\n"
+            "Examples:  artist → %album_artist   |   title → %track_number - %title"
+        )
+        help_lbl.setFont(QFont(FONT_FAMILY, Metrics.FONT_XS))
+        help_lbl.setStyleSheet(
+            f"color: {Colors.TEXT_TERTIARY}; background: transparent; border: none;"
+        )
+        help_lbl.setWordWrap(True)
+        outer.addLayout(btn_layout)
+        outer.addWidget(help_lbl)
+
+        self._block_signals = False
+
+    # ── Public API ───────────────────────────────────────────────────────────
+
+    def get_mapping(self) -> dict:
+        """Return the current mapping as a plain dict."""
+        result: dict[str, str] = {}
+        for row in range(self._table.rowCount()):
+            target_item = self._table.item(row, 0)
+            source_item = self._table.item(row, 1)
+            target = (target_item.text().strip() if target_item else "")
+            source = (source_item.text().strip() if source_item else "")
+            if target and source:
+                result[target] = source
+        return result
+
+    def set_mapping(self, mapping: dict) -> None:
+        """Populate the table from *mapping*."""
+        self._block_signals = True
+        self._table.setRowCount(0)
+        for target, source in mapping.items():
+            self._insert_row(str(target), str(source))
+        self._block_signals = False
+
+    # ── Private helpers ──────────────────────────────────────────────────────
+
+    def _insert_row(self, target: str = "", source: str = "") -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        t_item = QTableWidgetItem(target)
+        s_item = QTableWidgetItem(source)
+        self._table.setItem(row, 0, t_item)
+        self._table.setItem(row, 1, s_item)
+
+    def _add_row(self) -> None:
+        self._insert_row()
+        new_row = self._table.rowCount() - 1
+        self._table.setCurrentCell(new_row, 0)
+        self._table.editItem(self._table.item(new_row, 0))
+        self._emit_changed()
+
+    def _remove_selected(self) -> None:
+        selected = sorted(
+            {idx.row() for idx in self._table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in selected:
+            self._table.removeRow(row)
+        self._emit_changed()
+
+    def _on_item_changed(self, _item) -> None:
+        if not self._block_signals:
+            self._emit_changed()
+
+    def _emit_changed(self) -> None:
+        self.changed.emit(self.get_mapping())
+
+
 # ── Card container ──────────────────────────────────────────────────────────
 
 class _SettingsCard(QFrame):
@@ -586,6 +765,7 @@ class SettingsPage(QWidget):
         self._stack.addWidget(self._build_scrobbling_page())    # 4
         self._stack.addWidget(self._build_storage_page())       # 5
         self._stack.addWidget(self._build_backups_page())       # 6
+        self._stack.addWidget(self._build_tag_mapping_page())   # 7
         main.addWidget(self._stack, stretch=1)
 
         # Select first page
@@ -639,6 +819,7 @@ class SettingsPage(QWidget):
         nav_items = [
             "General", "Sync", "Transcoding",
             "External Tools", "Scrobbling", "Storage", "Backups",
+            "Tag Mapping",
         ]
         for i, name in enumerate(nav_items):
             btn = QPushButton(name)
@@ -999,6 +1180,27 @@ class SettingsPage(QWidget):
             ),
         )
 
+    def _build_tag_mapping_page(self) -> QScrollArea:
+        self.tag_mapping_editor = _TagMappingEditor()
+
+        desc_card = _SettingsCard(
+            SettingRow(
+                "Tag Mapping",
+                "Map track fields before writing to the iPod. "
+                "The target field receives the value of the source template. "
+                "Use %fieldname tokens to reference other fields "
+                "(e.g. %album_artist, %tracknumber). "
+                "When no mapping is defined, all fields are written as-is.",
+            )
+        )
+
+        return self._make_page(
+            "Tag Mapping",
+            desc_card,
+            "Rules",
+            self.tag_mapping_editor,
+        )
+
     # ── Settings I/O ────────────────────────────────────────────────────────
 
     def load_from_settings(self):
@@ -1069,6 +1271,9 @@ class SettingsPage(QWidget):
         if idx >= 0:
             self.podcast_max_downloaded.combo.setCurrentIndex(idx)
 
+        # Tag Mapping
+        self.tag_mapping_editor.set_mapping(s.tag_mapping or {})
+
         # Refresh tool status indicators
         self._refresh_tool_status()
 
@@ -1131,6 +1336,7 @@ class SettingsPage(QWidget):
             self.scrobble_on_sync.changed.connect(self._save)
             self.podcast_auto_sync.changed.connect(self._save)
             self.podcast_max_downloaded.changed.connect(self._save)
+            self.tag_mapping_editor.changed.connect(self._save)
 
     def _save(self, *_args):
         """Read all controls back into AppSettings and persist."""
@@ -1200,6 +1406,9 @@ class SettingsPage(QWidget):
         # Parse sync workers
         sw_text = self.sync_workers.value
         s.sync_workers = int(sw_text) if sw_text and sw_text != "Auto" else 0
+
+        # Tag mapping
+        s.tag_mapping = self.tag_mapping_editor.get_mapping()
 
         s.save()
 

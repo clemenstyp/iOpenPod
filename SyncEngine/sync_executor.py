@@ -185,6 +185,13 @@ class SyncExecutor:
         # Store on instance so helper methods can access it
         self._aac_bitrate = aac_bitrate
 
+        # Load tag mapping from settings (empty dict = no overrides)
+        try:
+            from GUI.settings import get_settings as _get_settings
+            self._tag_mapping: dict = _get_settings().tag_mapping or {}
+        except Exception:
+            self._tag_mapping = {}
+
         # ===== Pre-flight: Storage space check =====
         if not dry_run and plan.storage.bytes_to_add > 0:
             try:
@@ -823,97 +830,21 @@ class SyncExecutor:
             if dbid and dbid in tracks_by_dbid:
                 track = tracks_by_dbid[dbid]
                 for field_name, (pc_value, _ipod_value) in item.metadata_changes.items():
-                    if field_name == "title":
-                        track.title = pc_value
-                    elif field_name == "artist":
-                        track.artist = pc_value
-                    elif field_name == "album":
-                        track.album = pc_value
-                    elif field_name == "album_artist":
-                        track.album_artist = pc_value
-                    elif field_name == "genre":
-                        track.genre = pc_value
-                    elif field_name == "year":
-                        track.year = pc_value if pc_value else 0
-                    elif field_name == "track_number":
-                        track.track_number = pc_value if pc_value else 0
-                    elif field_name == "track_total":
-                        track.total_tracks = pc_value if pc_value else 0
-                    elif field_name == "disc_number":
-                        track.disc_number = pc_value if pc_value else 0
-                    elif field_name == "disc_total":
-                        track.total_discs = pc_value if pc_value else 1
-                    elif field_name == "composer":
-                        track.composer = pc_value
-                    elif field_name == "comment":
-                        track.comment = pc_value
-                    elif field_name == "grouping":
-                        track.grouping = pc_value
-                    elif field_name == "bpm":
-                        track.bpm = pc_value if pc_value else 0
-                    elif field_name == "compilation":
-                        track.compilation = bool(pc_value)
-                    elif field_name == "explicit_flag":
-                        track.explicit_flag = pc_value if pc_value else 0
-                    # Sort fields
-                    elif field_name == "sort_name":
-                        track.sort_name = pc_value
-                    elif field_name == "sort_artist":
-                        track.sort_artist = pc_value
-                    elif field_name == "sort_album":
-                        track.sort_album = pc_value
-                    elif field_name == "sort_album_artist":
-                        track.sort_album_artist = pc_value
-                    elif field_name == "sort_composer":
-                        track.sort_composer = pc_value
-                    elif field_name == "sort_show":
-                        track.sort_show = pc_value
-                    # Video/TV show fields
-                    elif field_name == "show_name":
-                        track.show_name = pc_value
-                    elif field_name == "season_number":
-                        track.season_number = pc_value if pc_value else 0
-                    elif field_name == "episode_number":
-                        track.episode_number = pc_value if pc_value else 0
-                    elif field_name == "description":
-                        track.description = pc_value
-                    elif field_name == "episode_id":
-                        track.episode_id = pc_value
-                    elif field_name == "network_name":
-                        track.network_name = pc_value
-                    elif field_name == "sound_check":
-                        track.sound_check = pc_value if pc_value else 0
-                    elif field_name == "subtitle":
-                        track.subtitle = pc_value
-                    elif field_name == "category":
-                        track.category = pc_value
-                    elif field_name == "podcast_url":
-                        track.podcast_rss_url = pc_value
-                    elif field_name == "podcast_enclosure_url":
-                        track.podcast_enclosure_url = pc_value
-                    elif field_name == "lyrics":
-                        track.lyrics = pc_value
-                    elif field_name == "sort_show":
-                        track.sort_show = pc_value
-                    # ── iPod-only flags (from GUI edits) ──────────────
-                    elif field_name == "skip_when_shuffling":
-                        track.skip_when_shuffling = bool(pc_value)
-                    elif field_name == "remember_position":
-                        track.remember_position = bool(pc_value)
-                    elif field_name == "gapless_track_flag":
-                        track.gapless_track_flag = pc_value if pc_value else 0
-                    elif field_name == "gapless_album_flag":
-                        track.gapless_album_flag = pc_value if pc_value else 0
-                    elif field_name == "checked_flag":
-                        track.checked = pc_value if pc_value else 0
-                    elif field_name == "not_played_flag":
-                        track.played_mark = pc_value if pc_value else 0
-                    elif field_name == "volume":
-                        track.volume = pc_value if pc_value else 0
-                    elif field_name == "start_time":
-                        track.start_time = pc_value if pc_value else 0
-                    elif field_name == "stop_time":
-                        track.stop_time = pc_value if pc_value else 0
+                    self._apply_field_to_track(track, field_name, pc_value)
+
+                # Apply tag mapping overrides on top of the diff-engine changes.
+                # This ensures mapped fields are updated even when the diff engine
+                # saw no change (e.g. artist was the same on PC and iPod, but the
+                # mapping says to substitute album_artist).
+                tag_mapping = getattr(self, "_tag_mapping", {})
+                if tag_mapping and item.pc_track:
+                    from .tag_mapping import TagMappingService
+                    mapped_pc = TagMappingService.apply(item.pc_track, tag_mapping)
+                    for target_field in tag_mapping:
+                        mapped_value = getattr(mapped_pc, target_field, None)
+                        original_value = getattr(item.pc_track, target_field, None)
+                        if mapped_value != original_value:
+                            self._apply_field_to_track(track, target_field, mapped_value)
 
             # Refresh mapping mtime/size so next sync doesn't see a spurious file change
             if item.fingerprint and item.pc_track and not dry_run:
@@ -933,6 +864,103 @@ class SyncExecutor:
                     )
 
             result.tracks_updated_metadata += 1
+
+    def _apply_field_to_track(self, track, field_name: str, pc_value) -> None:
+        """Apply a single metadata field value to a TrackInfo object.
+
+        This helper centralises the PCTrack field-name → TrackInfo attribute
+        mapping so it can be reused by both the diff-engine update loop and
+        the tag-mapping override logic.
+        """
+        if field_name == "title":
+            track.title = pc_value
+        elif field_name == "artist":
+            track.artist = pc_value
+        elif field_name == "album":
+            track.album = pc_value
+        elif field_name == "album_artist":
+            track.album_artist = pc_value
+        elif field_name == "genre":
+            track.genre = pc_value
+        elif field_name == "year":
+            track.year = pc_value if pc_value else 0
+        elif field_name == "track_number":
+            track.track_number = pc_value if pc_value else 0
+        elif field_name == "track_total":
+            track.total_tracks = pc_value if pc_value else 0
+        elif field_name == "disc_number":
+            track.disc_number = pc_value if pc_value else 0
+        elif field_name == "disc_total":
+            track.total_discs = pc_value if pc_value else 1
+        elif field_name == "composer":
+            track.composer = pc_value
+        elif field_name == "comment":
+            track.comment = pc_value
+        elif field_name == "grouping":
+            track.grouping = pc_value
+        elif field_name == "bpm":
+            track.bpm = pc_value if pc_value else 0
+        elif field_name == "compilation":
+            track.compilation = bool(pc_value)
+        elif field_name == "explicit_flag":
+            track.explicit_flag = pc_value if pc_value else 0
+        # Sort fields
+        elif field_name == "sort_name":
+            track.sort_name = pc_value
+        elif field_name == "sort_artist":
+            track.sort_artist = pc_value
+        elif field_name == "sort_album":
+            track.sort_album = pc_value
+        elif field_name == "sort_album_artist":
+            track.sort_album_artist = pc_value
+        elif field_name == "sort_composer":
+            track.sort_composer = pc_value
+        elif field_name == "sort_show":
+            track.sort_show = pc_value
+        # Video/TV show fields
+        elif field_name == "show_name":
+            track.show_name = pc_value
+        elif field_name == "season_number":
+            track.season_number = pc_value if pc_value else 0
+        elif field_name == "episode_number":
+            track.episode_number = pc_value if pc_value else 0
+        elif field_name == "description":
+            track.description = pc_value
+        elif field_name == "episode_id":
+            track.episode_id = pc_value
+        elif field_name == "network_name":
+            track.network_name = pc_value
+        elif field_name == "sound_check":
+            track.sound_check = pc_value if pc_value else 0
+        elif field_name == "subtitle":
+            track.subtitle = pc_value
+        elif field_name == "category":
+            track.category = pc_value
+        elif field_name == "podcast_url":
+            track.podcast_rss_url = pc_value
+        elif field_name == "podcast_enclosure_url":
+            track.podcast_enclosure_url = pc_value
+        elif field_name == "lyrics":
+            track.lyrics = pc_value
+        # ── iPod-only flags (from GUI edits) ──────────────
+        elif field_name == "skip_when_shuffling":
+            track.skip_when_shuffling = bool(pc_value)
+        elif field_name == "remember_position":
+            track.remember_position = bool(pc_value)
+        elif field_name == "gapless_track_flag":
+            track.gapless_track_flag = pc_value if pc_value else 0
+        elif field_name == "gapless_album_flag":
+            track.gapless_album_flag = pc_value if pc_value else 0
+        elif field_name == "checked_flag":
+            track.checked = pc_value if pc_value else 0
+        elif field_name == "not_played_flag":
+            track.played_mark = pc_value if pc_value else 0
+        elif field_name == "volume":
+            track.volume = pc_value if pc_value else 0
+        elif field_name == "start_time":
+            track.start_time = pc_value if pc_value else 0
+        elif field_name == "stop_time":
+            track.stop_time = pc_value if pc_value else 0
 
     def _execute_artwork_updates(self, plan, mapping, dry_run):
         """Update mapping art_hash for tracks with changed artwork.
@@ -1851,6 +1879,12 @@ class SyncExecutor:
             was_transcoded: Whether the file was format-converted.
             ipod_file_path: Actual file on iPod (for accurate size after transcode).
         """
+        # Apply tag mapping overrides before extracting any field values
+        tag_mapping = getattr(self, "_tag_mapping", {})
+        if tag_mapping:
+            from .tag_mapping import TagMappingService
+            pc_track = TagMappingService.apply(pc_track, tag_mapping)
+
         ext = Path(ipod_location.replace(":", "/")).suffix.lower().lstrip(".")
         if ext in ("m4a", "aac", "alac"):
             filetype = "m4a"

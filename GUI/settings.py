@@ -184,6 +184,14 @@ class AppSettings:
     # Oldest episodes beyond this limit are deleted on refresh.
     podcast_max_downloaded: int = 0
 
+    # ── Tag Mapping ─────────────────────────────────────────────────────────
+    # Configurable field overrides applied to each track before writing to iPod.
+    # Keys are PCTrack field names (destination), values are source templates
+    # using %fieldname syntax.
+    # Example: {"artist": "%album_artist", "title": "%tracknumber - %title"}
+    # Empty dict = no overrides (default behaviour).
+    tag_mapping: dict = field(default_factory=dict)
+
     def save(self) -> None:
         """Write settings to the active settings directory.
 

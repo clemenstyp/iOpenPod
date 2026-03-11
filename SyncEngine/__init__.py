@@ -49,6 +49,7 @@ from .transcode_cache import TranscodeCache, CachedFile, CacheIndex
 from .backup_manager import BackupManager, SnapshotInfo, BackupProgress, get_device_identifier, get_device_display_name
 from .eta import ETATracker
 from .spl_evaluator import spl_update, spl_update_from_parsed, spl_update_all
+from .tag_mapping import TagMappingService
 
 __all__ = [
     # PC Library
@@ -108,4 +109,6 @@ __all__ = [
     "spl_update",
     "spl_update_from_parsed",
     "spl_update_all",
+    # Tag mapping
+    "TagMappingService",
 ]

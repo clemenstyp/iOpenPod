@@ -264,6 +264,13 @@ class SyncExecutor:
             listenbrainz_token=listenbrainz_token,
         )
 
+        # Load tag mapping from settings (empty dict = no overrides)
+        try:
+            from settings import get_settings as _get_settings
+            self._tag_mapping: dict = _get_settings().tag_mapping or {}
+        except Exception:
+            self._tag_mapping = {}
+
         if not self._preflight_checks(ctx):
             return ctx.result
 
@@ -297,10 +304,6 @@ class SyncExecutor:
     def _preflight_checks(self, ctx: _SyncContext) -> bool:
         """Return False (and populate ctx.result) if sync cannot proceed."""
         if not ctx.dry_run and ctx.plan.storage.bytes_to_add > 0:
-            try:
-                disk = shutil.disk_usage(self.ipod_path)
-                needed = (ctx.plan.storage.bytes_to_add
-                          - ctx.plan.storage.bytes_to_remove
                           + _DB_OVERHEAD_BYTES)
                 if needed > 0 and disk.free < needed:
                     free_mb = disk.free / (1024 * 1024)
@@ -851,17 +854,21 @@ class SyncExecutor:
             if db_id and db_id in ctx.tracks_by_db_id:
                 track = ctx.tracks_by_db_id[db_id]
                 for field_name, (pc_value, _ipod_value) in item.metadata_changes.items():
-                    mapping_entry = self._META_FIELD_MAP.get(field_name)
-                    if mapping_entry is not None:
-                        attr, coerce = mapping_entry
-                        if coerce == "int":
-                            setattr(track, attr, pc_value if pc_value else 0)
-                        elif coerce == "int1":
-                            setattr(track, attr, pc_value if pc_value else 1)
-                        elif coerce == "bool":
-                            setattr(track, attr, bool(pc_value))
-                        else:
-                            setattr(track, attr, pc_value)
+                    self._apply_field_to_track(track, field_name, pc_value)
+
+                # Apply tag mapping overrides on top of the diff-engine changes.
+                # This ensures mapped fields are updated even when the diff engine
+                # saw no change (e.g. artist was the same on PC and iPod, but the
+                # mapping says to substitute album_artist).
+                tag_mapping = getattr(self, "_tag_mapping", {})
+                if tag_mapping and item.pc_track:
+                    from .tag_mapping import TagMappingService
+                    mapped_pc = TagMappingService.apply(item.pc_track, tag_mapping)
+                    for target_field in tag_mapping:
+                        mapped_value = getattr(mapped_pc, target_field, None)
+                        original_value = getattr(item.pc_track, target_field, None)
+                        if mapped_value != original_value:
+                            self._apply_field_to_track(track, target_field, mapped_value)
 
             # Refresh mapping mtime/size so next sync doesn't see a spurious file change
             if item.fingerprint and item.pc_track and not ctx.dry_run:
@@ -881,6 +888,25 @@ class SyncExecutor:
                     )
 
             ctx.result.tracks_updated_metadata += 1
+
+    def _apply_field_to_track(self, track, field_name: str, pc_value) -> None:
+        """Apply a single metadata field value to a TrackInfo object.
+
+        This helper centralises the PCTrack field-name → TrackInfo attribute
+        mapping so it can be reused by both the diff-engine update loop and
+        the tag-mapping override logic.
+        """
+        mapping_entry = self._META_FIELD_MAP.get(field_name)
+        if mapping_entry is not None:
+            attr, coerce = mapping_entry
+            if coerce == "int":
+                setattr(track, attr, pc_value if pc_value else 0)
+            elif coerce == "int1":
+                setattr(track, attr, pc_value if pc_value else 1)
+            elif coerce == "bool":
+                setattr(track, attr, bool(pc_value))
+            else:
+                setattr(track, attr, pc_value)
 
     def _execute_artwork_updates(self, ctx: _SyncContext) -> None:
         """Update mapping art_hash for tracks with changed artwork.
@@ -1654,6 +1680,12 @@ class SyncExecutor:
             was_transcoded: Whether the file was format-converted.
             ipod_file_path: Actual file on iPod (for accurate size after transcode).
         """
+        # Apply tag mapping overrides before extracting any field values
+        tag_mapping = getattr(self, "_tag_mapping", {})
+        if tag_mapping:
+            from .tag_mapping import TagMappingService
+            pc_track = TagMappingService.apply(pc_track, tag_mapping)
+
         ext = Path(ipod_location.replace(":", "/")).suffix.lower().lstrip(".")
         if ext in ("m4a", "aac", "alac"):
             filetype = "m4a"

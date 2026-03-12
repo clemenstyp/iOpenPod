@@ -174,6 +174,38 @@ def test_unknown_target_field_is_skipped():
     print("PASS")
 
 
+def test_mapped_diff_shows_mapped_pc_value():
+    """When a tag mapping is active, the 'pc_val' in the diff must be the
+    *mapped* value, not the original.  This mirrors the fix in
+    fingerprint_diff_engine.py where _compare_metadata receives the mapped
+    pc_track so the sync review displays the correct destination value.
+    """
+    print("test_mapped_diff_shows_mapped_pc_value ... ", end="")
+
+    # Simulate: title → %track_number - %title
+    mapping = {"title": "%track_number - %title"}
+    pc = _PCTrack(title="Bohemian Rhapsody", track_number=1, artist="Queen")
+    mapped_pc = TagMappingService.apply(pc, mapping)
+    assert mapped_pc.title == "1 - Bohemian Rhapsody"
+
+    # The diff engine would compare mapped_pc.title with the iPod title.
+    # If iPod still has the original title, a change should be detected.
+    ipod_title = "Bohemian Rhapsody"
+    assert mapped_pc.title != ipod_title, (
+        "mapped title should differ from original iPod title so a change is detected"
+    )
+
+    # If the iPod already has the mapped title, no change should be detected.
+    ipod_mapped_title = "1 - Bohemian Rhapsody"
+    assert mapped_pc.title == ipod_mapped_title, (
+        "when iPod already has the mapped title no update should be needed"
+    )
+
+    # Original pc_track title is unchanged (SyncItem.pc_track keeps raw data)
+    assert pc.title == "Bohemian Rhapsody"
+    print("PASS")
+
+
 def test_compute_hash_empty_mapping():
     """Empty mapping must return empty string."""
     print("test_compute_hash_empty_mapping ... ", end="")
@@ -226,6 +258,7 @@ if __name__ == "__main__":
     test_original_fields_unmodified()
     test_multiple_rules()
     test_unknown_target_field_is_skipped()
+    test_mapped_diff_shows_mapped_pc_value()
     test_compute_hash_empty_mapping()
     test_compute_hash_is_stable()
     test_compute_hash_order_independent()

@@ -21,6 +21,8 @@ Example mapping::
 """
 
 import copy
+import hashlib
+import json
 import logging
 import re
 from typing import Optional
@@ -165,3 +167,16 @@ class TagMappingService:
             return "" if val is None else str(val)
 
         return _TOKEN_RE.sub(_replace, template)
+
+    @staticmethod
+    def compute_hash(mapping: dict) -> str:
+        """Return a stable SHA-256 hash of *mapping* for change detection.
+
+        Uses a canonical JSON representation (sorted keys, ASCII-safe) so
+        the hash is identical regardless of insertion order or Python version.
+        Returns an empty string when *mapping* is empty or falsy.
+        """
+        if not mapping:
+            return ""
+        serialised = json.dumps(mapping, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(serialised.encode()).hexdigest()

@@ -174,6 +174,43 @@ def test_unknown_target_field_is_skipped():
     print("PASS")
 
 
+def test_compute_hash_empty_mapping():
+    """Empty mapping must return empty string."""
+    print("test_compute_hash_empty_mapping ... ", end="")
+    assert TagMappingService.compute_hash({}) == ""
+    assert TagMappingService.compute_hash(None) == ""
+    print("PASS")
+
+
+def test_compute_hash_is_stable():
+    """Same mapping must always produce the same hash."""
+    print("test_compute_hash_is_stable ... ", end="")
+    mapping = {"artist": "%album_artist", "title": "%track_number - %title"}
+    h1 = TagMappingService.compute_hash(mapping)
+    h2 = TagMappingService.compute_hash(mapping)
+    assert h1 == h2
+    assert len(h1) == 64  # SHA-256 hex digest
+    print("PASS")
+
+
+def test_compute_hash_order_independent():
+    """Insertion order must not affect the hash."""
+    print("test_compute_hash_order_independent ... ", end="")
+    m1 = {"artist": "%album_artist", "title": "%track_number - %title"}
+    m2 = {"title": "%track_number - %title", "artist": "%album_artist"}
+    assert TagMappingService.compute_hash(m1) == TagMappingService.compute_hash(m2)
+    print("PASS")
+
+
+def test_compute_hash_different_mappings():
+    """Different mappings must produce different hashes."""
+    print("test_compute_hash_different_mappings ... ", end="")
+    m1 = {"artist": "%album_artist"}
+    m2 = {"artist": "%composer"}
+    assert TagMappingService.compute_hash(m1) != TagMappingService.compute_hash(m2)
+    print("PASS")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -189,4 +226,8 @@ if __name__ == "__main__":
     test_original_fields_unmodified()
     test_multiple_rules()
     test_unknown_target_field_is_skipped()
+    test_compute_hash_empty_mapping()
+    test_compute_hash_is_stable()
+    test_compute_hash_order_independent()
+    test_compute_hash_different_mappings()
     print("\n✅ All tests passed.")

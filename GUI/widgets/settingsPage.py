@@ -23,6 +23,23 @@ from ..styles import (
 )
 
 
+# ── Valid PCTrack target fields for the tag-mapping dropdown ────────────────
+# These match the keys of METADATA_FIELDS in fingerprint_diff_engine.py.
+# Listed in a user-friendly order (most common fields first).
+_PCTRACK_TARGET_FIELDS: list[str] = [
+    "artist", "album_artist", "title", "album", "genre",
+    "year", "track_number", "track_total", "disc_number", "disc_total",
+    "composer", "comment", "grouping", "bpm", "compilation",
+    "lyrics",
+    "sort_name", "sort_artist", "sort_album", "sort_album_artist",
+    "sort_composer",
+    "explicit_flag", "sort_show", "show_name", "season_number",
+    "episode_number", "description", "episode_id", "network_name",
+    "category", "subtitle", "podcast_url", "podcast_enclosure_url",
+    "sound_check",
+]
+
+
 # ── Reusable row widgets ────────────────────────────────────────────────────
 
 class SettingRow(QFrame):
@@ -580,13 +597,14 @@ class _TagMappingEditor(QFrame):
     """Compact table editor for the ``tag_mapping`` setting.
 
     Displays a two-column table (Target Field / Source Template) with
-    **Add** and **Remove** buttons.  The ``changed`` signal fires after
-    every structural edit (add/remove row) or after any cell edit.
+    **Add** and **Remove** buttons.  Column 0 (Target Field) uses an inline
+    ``QComboBox`` so only valid PCTrack field names can be selected.  The
+    ``changed`` signal fires after every structural edit (add/remove row) or
+    after any cell / combo-box edit.
     """
 
     changed = pyqtSignal(dict)  # emits the current mapping dict
 
-    _PLACEHOLDER_TARGET = "e.g. artist"
     _PLACEHOLDER_SOURCE = "e.g. %album_artist"
 
     def __init__(self):
@@ -608,11 +626,12 @@ class _TagMappingEditor(QFrame):
         self._table = QTableWidget(0, 2)
         self._table.setHorizontalHeaderLabels(["Target Field", "Source Template"])
         self._table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
+            0, QHeaderView.ResizeMode.Interactive
         )
         self._table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
+        self._table.horizontalHeader().setDefaultSectionSize(scaled(170))
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setAlternatingRowColors(False)
@@ -682,7 +701,7 @@ class _TagMappingEditor(QFrame):
         btn_layout.addStretch()
 
         help_lbl = QLabel(
-            "Target: PCTrack field name (artist, album_artist, title, genre, …)\n"
+            "Target: select destination field from the dropdown\n"
             "Source: template with %fieldname tokens\n"
             "Examples:  artist → %album_artist   |   title → %track_number - %title"
         )
@@ -702,9 +721,9 @@ class _TagMappingEditor(QFrame):
         """Return the current mapping as a plain dict."""
         result: dict[str, str] = {}
         for row in range(self._table.rowCount()):
-            target_item = self._table.item(row, 0)
+            combo = self._table.cellWidget(row, 0)
             source_item = self._table.item(row, 1)
-            target = (target_item.text().strip() if target_item else "")
+            target = combo.currentText() if combo else ""
             source = (source_item.text().strip() if source_item else "")
             if target and source:
                 result[target] = source
@@ -720,19 +739,53 @@ class _TagMappingEditor(QFrame):
 
     # ── Private helpers ──────────────────────────────────────────────────────
 
+    def _make_target_combo(self, selected: str = "") -> QComboBox:
+        """Create and return a styled QComboBox for the Target Field column."""
+        combo = QComboBox()
+        combo.addItems(_PCTRACK_TARGET_FIELDS)
+        # If the stored value is not in the canonical list (e.g. from an older
+        # version), add it as the first item so existing data is not lost.
+        if selected and selected not in _PCTRACK_TARGET_FIELDS:
+            combo.insertItem(0, selected)
+        if selected:
+            combo.setCurrentText(selected)
+        combo.setFont(QFont(FONT_FAMILY, Metrics.FONT_SM))
+        combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {Colors.SURFACE};
+                border: none;
+                color: {Colors.TEXT_PRIMARY};
+                padding: {scaled(2)}px {scaled(4)}px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox:focus {{ background: {Colors.SURFACE_RAISED}; }}
+            QComboBox QAbstractItemView {{
+                background: {Colors.SURFACE_RAISED};
+                color: {Colors.TEXT_PRIMARY};
+                selection-background-color: {Colors.ACCENT};
+                selection-color: {Colors.TEXT_ON_ACCENT};
+            }}
+        """)
+        combo.currentTextChanged.connect(
+            lambda _: None if self._block_signals else self._emit_changed()
+        )
+        return combo
+
     def _insert_row(self, target: str = "", source: str = "") -> None:
         row = self._table.rowCount()
         self._table.insertRow(row)
-        t_item = QTableWidgetItem(target)
+        combo = self._make_target_combo(target or _PCTRACK_TARGET_FIELDS[0])
+        self._table.setCellWidget(row, 0, combo)
         s_item = QTableWidgetItem(source)
-        self._table.setItem(row, 0, t_item)
         self._table.setItem(row, 1, s_item)
 
     def _add_row(self) -> None:
-        self._insert_row()
+        self._insert_row(_PCTRACK_TARGET_FIELDS[0], "")
         new_row = self._table.rowCount() - 1
-        self._table.setCurrentCell(new_row, 0)
-        self._table.editItem(self._table.item(new_row, 0))
+        self._table.setCurrentCell(new_row, 1)
+        source_item = self._table.item(new_row, 1)
+        if source_item:
+            self._table.editItem(source_item)
         self._emit_changed()
 
     def _remove_selected(self) -> None:

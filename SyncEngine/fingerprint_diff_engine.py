@@ -524,6 +524,10 @@ class FingerprintDiffEngine:
         # mapping entries have already been claimed so each PC track gets its own.
         claimed_dbids: set[int] = set()
 
+        # Collect all successfully matched (fp, dbid, pc_track, ipod_track)
+        # tuples so we can detect tag-mapping changes after the loop.
+        matched_for_remap: list[tuple[str, int, "PCTrack", dict]] = []
+
         for (fp, _album_key), pc_tracks_for_group in identity_groups.items():
             # Pick representative track (first one from this album group)
             pc_track = pc_tracks_for_group[0]
@@ -584,6 +588,9 @@ class FingerprintDiffEngine:
 
             # Record PC path for artwork extraction (all matched tracks)
             plan.matched_pc_paths[dbid] = str(pc_track.path)
+
+            # Collect for tag-mapping change detection (done after loop)
+            matched_for_remap.append((fp, dbid, pc_track, ipod_track))
 
             # ── Change detection ──
 
@@ -706,6 +713,56 @@ class FingerprintDiffEngine:
                     rating_strategy=strategy,
                     description=f"Rating: {pc_track.artist or 'Unknown'} - {pc_track.title or pc_track.filename}",
                 ))
+
+        # ===== Tag-mapping change detection =====
+        # If the configured tag_mapping has changed since the last sync, force
+        # UPDATE_METADATA on all matched tracks so the new mapping is applied.
+        # Tracks already scheduled for a file update get the mapping applied
+        # automatically via _pc_track_to_info(), so they are excluded here.
+        try:
+            from GUI.settings import get_settings as _gs
+            _current_tag_mapping: dict = _gs().tag_mapping or {}
+        except Exception:
+            _current_tag_mapping = {}
+
+        from .tag_mapping import TagMappingService as _TMS
+        _current_hash = _TMS.compute_hash(_current_tag_mapping)
+        _stored_hash = mapping.tag_mapping_hash
+
+        if _current_hash != _stored_hash and matched_for_remap:
+            # Build lookup of dbids already scheduled to avoid duplicates.
+            _meta_dbids = {item.dbid for item in plan.to_update_metadata if item.dbid}
+            _file_dbids = {item.dbid for item in plan.to_update_file if item.dbid}
+
+            _forced_count = 0
+            for _fp, _dbid, _pc, _ipod in matched_for_remap:
+                if _dbid in _meta_dbids or _dbid in _file_dbids:
+                    continue  # executor will apply mapping already
+                plan.to_update_metadata.append(SyncItem(
+                    action=SyncAction.UPDATE_METADATA,
+                    fingerprint=_fp,
+                    pc_track=_pc,
+                    dbid=_dbid,
+                    ipod_track=_ipod,
+                    metadata_changes={},
+                    description=(
+                        f"Tag mapping updated: "
+                        f"{_pc.artist or 'Unknown'} - "
+                        f"{_pc.title or _pc.filename}"
+                    ),
+                ))
+                _forced_count += 1
+
+            logger.info(
+                "Tag mapping changed (stored=%r -> new=%r): "
+                "forced metadata update for %d matched tracks",
+                _stored_hash, _current_hash, _forced_count,
+            )
+
+        # Store the current hash so the executor persists it on successful save.
+        # If no sync follows (user cancels), the in-memory change is discarded
+        # and the next compute_diff will re-detect the change correctly.
+        mapping.tag_mapping_hash = _current_hash
 
         # ===== Phase 4: Find tracks to remove =====
         if is_cancelled and is_cancelled():

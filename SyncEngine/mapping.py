@@ -82,6 +82,7 @@ class MappingFile:
     version: int = 2  # v2: tracks are lists
     created: str = ""
     modified: str = ""
+    tag_mapping_hash: str = ""  # SHA-256 of tag_mapping setting at last sync
     _tracks: dict[str, list[TrackMapping]] | None = None
     _dbid_index: dict[int, tuple[str, TrackMapping]] | None = None
 
@@ -250,7 +251,7 @@ class MappingFile:
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
-        return {
+        result: dict = {
             "version": self.version,
             "created": self.created,
             "modified": self.modified,
@@ -259,6 +260,9 @@ class MappingFile:
                 for fp, entries in self.tracks.items()
             },
         }
+        if self.tag_mapping_hash:
+            result["tag_mapping_hash"] = self.tag_mapping_hash
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "MappingFile":
@@ -283,6 +287,7 @@ class MappingFile:
             version=2,  # Always upgrade to v2
             created=data.get("created", ""),
             modified=data.get("modified", ""),
+            tag_mapping_hash=data.get("tag_mapping_hash", ""),
             _tracks=tracks,
         )
 

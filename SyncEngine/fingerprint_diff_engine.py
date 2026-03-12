@@ -524,6 +524,18 @@ class FingerprintDiffEngine:
         if progress_callback:
             progress_callback("diff", 0, 0, "Computing differences...")
 
+        # Load the tag mapping once so every track comparison uses the same value
+        # and so the post-loop hash-change detection can reuse it without a second
+        # settings import.
+        try:
+            from GUI.settings import get_settings as _get_settings
+            _current_tag_mapping: dict = _get_settings().tag_mapping or {}
+        except Exception:
+            _current_tag_mapping = {}
+
+        from .tag_mapping import TagMappingService as _TMS
+        _current_hash = _TMS.compute_hash(_current_tag_mapping)
+
         # For fingerprints with multiple album groups, we need to track which
         # mapping entries have already been claimed so each PC track gets its own.
         claimed_db_ids: set[int] = set()
@@ -610,8 +622,11 @@ class FingerprintDiffEngine:
                 ))
                 plan.storage.bytes_to_update += pc_track.size
 
-            # Metadata change
-            metadata_changes = self._compare_metadata(pc_track, ipod_track)
+            # Metadata change — compare using the *mapped* PC values so the
+            # sync review shows what will actually be written to the iPod.
+            _diff_pc = (_TMS.apply(pc_track, _current_tag_mapping)
+                        if _current_tag_mapping else pc_track)
+            metadata_changes = self._compare_metadata(_diff_pc, ipod_track)
             if metadata_changes:
                 plan.to_update_metadata.append(SyncItem(
                     action=SyncAction.UPDATE_METADATA,
@@ -718,14 +733,8 @@ class FingerprintDiffEngine:
         # UPDATE_METADATA on all matched tracks so the new mapping is applied.
         # Tracks already scheduled for a file update get the mapping applied
         # automatically via _pc_track_to_info(), so they are excluded here.
-        try:
-            from GUI.settings import get_settings as _gs
-            _current_tag_mapping: dict = _gs().tag_mapping or {}
-        except Exception:
-            _current_tag_mapping = {}
-
-        from .tag_mapping import TagMappingService as _TMS
-        _current_hash = _TMS.compute_hash(_current_tag_mapping)
+        # NOTE: _current_tag_mapping and _current_hash were loaded at the start
+        # of Phase 3 so no second settings import is needed here.
         _stored_hash = mapping.tag_mapping_hash
 
         if _current_hash != _stored_hash and matched_for_remap:
@@ -737,17 +746,26 @@ class FingerprintDiffEngine:
             for _fp, _dbid, _pc, _ipod in matched_for_remap:
                 if _dbid in _meta_dbids or _dbid in _file_dbids:
                     continue  # executor will apply mapping already
+                # Re-run comparison with mapped values to get accurate diff.
+                # If the iPod already has the correct mapped values this returns
+                # {} and we skip — no spurious "metadata changed" in the review.
+                _mapped_pc = (_TMS.apply(_pc, _current_tag_mapping)
+                              if _current_tag_mapping else _pc)
+                _forced_changes = self._compare_metadata(_mapped_pc, _ipod)
+                if not _forced_changes:
+                    continue
                 plan.to_update_metadata.append(SyncItem(
                     action=SyncAction.UPDATE_METADATA,
                     fingerprint=_fp,
                     pc_track=_pc,
                     dbid=_dbid,
                     ipod_track=_ipod,
-                    metadata_changes={},
+                    metadata_changes=_forced_changes,
                     description=(
                         f"Tag mapping updated: "
                         f"{_pc.artist or 'Unknown'} - "
                         f"{_pc.title or _pc.filename}"
+                        f" ({', '.join(_forced_changes.keys())})"
                     ),
                 ))
                 _forced_count += 1

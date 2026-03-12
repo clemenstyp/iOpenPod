@@ -605,8 +605,6 @@ class _TagMappingEditor(QFrame):
 
     changed = pyqtSignal(dict)  # emits the current mapping dict
 
-    _PLACEHOLDER_SOURCE = "e.g. %album_artist"
-
     def __init__(self):
         super().__init__()
         self.setObjectName("tagMappingEditor")
@@ -744,7 +742,8 @@ class _TagMappingEditor(QFrame):
         combo = QComboBox()
         combo.addItems(_PCTRACK_TARGET_FIELDS)
         # If the stored value is not in the canonical list (e.g. from an older
-        # version), add it as the first item so existing data is not lost.
+        # version or a manually edited JSON), insert it at position 0 so Qt
+        # selects it immediately via setCurrentText without needing index -1.
         if selected and selected not in _PCTRACK_TARGET_FIELDS:
             combo.insertItem(0, selected)
         if selected:

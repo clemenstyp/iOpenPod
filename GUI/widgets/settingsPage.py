@@ -617,8 +617,8 @@ class _TagMappingEditor(QFrame):
         """)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(scaled(16), scaled(16), scaled(16), scaled(16))
-        outer.setSpacing(scaled(12))
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(12)
 
         # ── Table ────────────────────────────────────────────────────────
         self._table = QTableWidget(0, 2)
@@ -629,12 +629,12 @@ class _TagMappingEditor(QFrame):
         self._table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
-        self._table.horizontalHeader().setDefaultSectionSize(scaled(170))
+        self._table.horizontalHeader().setDefaultSectionSize(170)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setAlternatingRowColors(False)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setMinimumHeight(scaled(120))
+        self._table.setMinimumHeight(120)
         self._table.setStyleSheet(f"""
             QTableWidget {{
                 background: {Colors.SURFACE};
@@ -649,11 +649,11 @@ class _TagMappingEditor(QFrame):
                 color: {Colors.TEXT_SECONDARY};
                 border: none;
                 border-bottom: 1px solid {Colors.BORDER};
-                padding: {scaled(4)}px {scaled(8)}px;
+                padding: {4}px {8}px;
                 font-size: {Metrics.FONT_SM}pt;
             }}
             QTableWidget::item {{
-                padding: {scaled(4)}px {scaled(6)}px;
+                padding: {4}px {6}px;
             }}
             QTableWidget::item:selected {{
                 background: {Colors.ACCENT};
@@ -665,11 +665,11 @@ class _TagMappingEditor(QFrame):
 
         # ── Buttons ──────────────────────────────────────────────────────
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(scaled(8))
+        btn_layout.setSpacing(8)
 
         self._add_btn = QPushButton("+ Add Rule")
         self._add_btn.setFont(QFont(FONT_FAMILY, Metrics.FONT_SM))
-        self._add_btn.setFixedWidth(scaled(110))
+        self._add_btn.setFixedWidth(110)
         self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_btn.setStyleSheet(btn_css(
             bg=Colors.ACCENT,
@@ -684,7 +684,7 @@ class _TagMappingEditor(QFrame):
 
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.setFont(QFont(FONT_FAMILY, Metrics.FONT_SM))
-        self._remove_btn.setFixedWidth(scaled(90))
+        self._remove_btn.setFixedWidth(90)
         self._remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._remove_btn.setStyleSheet(btn_css(
             bg=Colors.SURFACE_RAISED,
@@ -754,7 +754,7 @@ class _TagMappingEditor(QFrame):
                 background: {Colors.SURFACE};
                 border: none;
                 color: {Colors.TEXT_PRIMARY};
-                padding: {scaled(2)}px {scaled(4)}px;
+                padding: {2}px {4}px;
             }}
             QComboBox::drop-down {{ border: none; }}
             QComboBox:focus {{ background: {Colors.SURFACE_RAISED}; }}

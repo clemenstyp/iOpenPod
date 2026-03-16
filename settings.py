@@ -178,6 +178,14 @@ class AppSettings:
     # Maximum number of backup snapshots to retain per device (0 = unlimited).
     max_backups: int = 10
 
+    # ── Tag Mapping ─────────────────────────────────────────────────────────
+    # Configurable field overrides applied to each track before writing to iPod.
+    # Keys are PCTrack field names (destination), values are source templates
+    # using %fieldname syntax.
+    # Example: {"artist": "%album_artist", "title": "%tracknumber - %title"}
+    # Empty dict = no overrides (default behaviour).
+    tag_mapping: dict = field(default_factory=dict)
+
     def save(self) -> None:
         """Write settings to the active settings directory.
 

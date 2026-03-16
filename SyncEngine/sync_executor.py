@@ -304,6 +304,10 @@ class SyncExecutor:
     def _preflight_checks(self, ctx: _SyncContext) -> bool:
         """Return False (and populate ctx.result) if sync cannot proceed."""
         if not ctx.dry_run and ctx.plan.storage.bytes_to_add > 0:
+            try:
+                disk = shutil.disk_usage(self.ipod_path)
+                needed = (ctx.plan.storage.bytes_to_add
+                          - ctx.plan.storage.bytes_to_remove
                           + _DB_OVERHEAD_BYTES)
                 if needed > 0 and disk.free < needed:
                     free_mb = disk.free / (1024 * 1024)

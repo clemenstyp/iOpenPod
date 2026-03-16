@@ -528,7 +528,7 @@ class FingerprintDiffEngine:
         # and so the post-loop hash-change detection can reuse it without a second
         # settings import.
         try:
-            from GUI.settings import get_settings as _get_settings
+            from settings import get_settings as _get_settings
             _current_tag_mapping: dict = _get_settings().tag_mapping or {}
         except Exception:
             _current_tag_mapping = {}

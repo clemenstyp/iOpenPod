@@ -175,3 +175,4 @@ cython_debug/
 # Claude Code
 .claude/
 CLAUDE.md
+.idea

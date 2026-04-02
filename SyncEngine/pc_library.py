@@ -642,6 +642,22 @@ class PCLibrary:
         else:
             needs_tc = ext in NEEDS_TRANSCODING
 
+        track_number_prefix = ""
+        if metadata.get("track_number", 0) > 0:
+            if metadata.get("disc_total", 1) > 1 or metadata.get("disc_number", 1) > 1:
+                track_number_prefix += f"{metadata.get('disc_number', 1)}-"
+            track_number_prefix += f"{metadata.get('track_number', 1)}"
+            track_number_prefix += " - "
+        pc_track_title = track_number_prefix + metadata.get("title", file_path.stem)
+
+        if metadata.get("compilation", False):
+            pc_track_artist = metadata.get("artist", "Unknown Artist")
+        else:
+            pc_track_artist = metadata.get("album_artist") or metadata.get("artist", "Unknown Artist")
+
+        pc_track_composer = metadata.get("artist", "Unknown Artist")
+
+
         return PCTrack(
             path=str(file_path),
             relative_path=str(file_path.relative_to(self.root_path)),
@@ -649,8 +665,8 @@ class PCLibrary:
             extension=ext,
             mtime=stat.st_mtime,
             size=stat.st_size,
-            title=metadata.get("title", file_path.stem),
-            artist=metadata.get("artist", "Unknown Artist"),
+            title=pc_track_title,
+            artist=pc_track_artist,
             album=metadata.get("album", "Unknown Album"),
             album_artist=metadata.get("album_artist"),
             genre=metadata.get("genre"),
@@ -670,7 +686,7 @@ class PCLibrary:
             sort_composer=metadata.get("sort_composer"),
             compilation=metadata.get("compilation", False),
             comment=metadata.get("comment"),
-            composer=metadata.get("composer"),
+            composer=pc_track_composer,
             grouping=metadata.get("grouping"),
             bpm=metadata.get("bpm"),
             sound_check=metadata.get("sound_check", 0),
